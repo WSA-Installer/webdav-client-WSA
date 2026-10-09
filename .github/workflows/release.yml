@@ -58,16 +58,26 @@ jobs:
             -o "dist/$ASSET"
           file "dist/$ASSET"
           chmod 755 "dist/$ASSET"
+      - name: Install QEMU (for aarch64 smoke on x86_64 host)
+        if: matrix.target == 'aarch64'
+        run: |
+          set -eu
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq qemu-user-static
+          qemu-aarch64-static --version | head -n 1
       - name: Smoke test
         env:
           ASSET: ${{ matrix.asset }}
+          TARGET: ${{ matrix.target }}
         run: |
           set -eu
-          "dist/$ASSET" --version | grep -q webdavfs
-          "dist/$ASSET" --selftest
-          "dist/$ASSET" --help >/dev/null
+          RUN=""
+          if [ "$TARGET" = "aarch64" ]; then RUN="qemu-aarch64-static"; fi
+          $RUN "dist/$ASSET" --version | grep -q webdavfs
+          $RUN "dist/$ASSET" --selftest
+          $RUN "dist/$ASSET" --help >/dev/null
           # Graceful failure: nonexistent mountpoint must be rejected before any mount.
-          if "dist/$ASSET" http://127.0.0.1:8085/c/ /nonexistent >/tmp/out 2>&1; then
+          if $RUN "dist/$ASSET" http://127.0.0.1:8085/c/ /nonexistent >/tmp/out 2>&1; then
             echo "unexpected mount success" >&2
             exit 1
           fi
@@ -122,6 +132,9 @@ jobs:
           cp dist/native/webdavfs-aarch64 dist/
           sh -n dist/webdavfs.sh
           for f in webdavfs.sh webdavfs-x86_64 webdavfs-aarch64 webdavfs-universal; do test -s "dist/$f"; done
+          # Universal launcher smoke (host is x86_64; verifies self-extract + dispatch).
+          dist/webdavfs-universal --version | grep -q webdavfs
+          dist/webdavfs-universal --selftest
           ls -lh dist/webdavfs*
       - uses: actions/upload-artifact@v4
         with:

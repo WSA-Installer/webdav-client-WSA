@@ -667,18 +667,35 @@ static char *href_to_name(const char *href) {
     return dec;
 }
 
+static int xml_name_char(char c) {
+    return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+           (c >= '0' && c <= '9') || c == '_' || c == '-';
+}
+
+static const char *xml_bare_name(const char *lt) {
+    if (*lt != '<') return NULL;
+    const char *name = lt + 1;
+    if (*name == '/') name++;
+    const char *scan = name;
+    while (*scan && xml_name_char(*scan)) scan++;
+    if (*scan == ':') name = scan + 1;
+    return name;
+}
+
 static const char *tag_body(const char *p, const char *tag, char *out, size_t cap) {
-    char open1[64], open2[64];
-    snprintf(open1, sizeof open1, "<%s>", tag);
-    snprintf(open2, sizeof open2, "<%s ", tag);
-    const char *start = NULL;
+    size_t tlen = strlen(tag);
     const char *q = p;
+    const char *start = NULL;
+    const char *bare = NULL;
     while ((q = strchr(q, '<')) != NULL) {
-        if (!strncasecmp(q + 1, tag, strlen(tag))) {
-            const char *after = q + 1 + strlen(tag);
+        if (q[1] == '/') { q++; continue; }
+        const char *name = xml_bare_name(q);
+        if (name && !strncasecmp(name, tag, tlen)) {
+            const char *after = name + tlen;
             if (*after == '>' || *after == ' ' || *after == '/' ||
                 *after == '\t' || *after == '\r' || *after == '\n') {
                 start = q;
+                bare = name;
                 break;
             }
         }
@@ -687,22 +704,26 @@ static const char *tag_body(const char *p, const char *tag, char *out, size_t ca
     if (!start) return NULL;
     const char *gt = strchr(start, '>');
     if (!gt) return NULL;
-    if (start[1 + strlen(tag)] == '/') {
+    if (bare[tlen] == '/') {
         out[0] = 0;
         return gt + 1;
     }
-    char close_tag[80];
-    snprintf(close_tag, sizeof close_tag, "</%s>", tag);
     const char *end = NULL;
     for (const char *r = gt + 1; (r = strchr(r, '<')) != NULL; r++) {
-        if (!strncasecmp(r, close_tag, strlen(close_tag))) { end = r; break; }
+        if (r[1] != '/') continue;
+        const char *name = xml_bare_name(r);
+        if (name && !strncasecmp(name, tag, tlen) && name[tlen] == '>') {
+            end = r;
+            break;
+        }
     }
     if (!end) return NULL;
     size_t len = (size_t)(end - (gt + 1));
     if (len >= cap) len = cap - 1;
     memcpy(out, gt + 1, len);
     out[len] = 0;
-    return end + strlen(close_tag);
+    const char *close_gt = strchr(end, '>');
+    return close_gt ? close_gt + 1 : end + 1;
 }
 
 static int propfind_list(const char *rel, dent_t **out_ents, size_t *out_n) {
@@ -736,20 +757,24 @@ static int propfind_list(const char *rel, dent_t **out_ents, size_t *out_n) {
             cmod[0] = 0;
             const char *nxt = q;
             while ((nxt = strchr(nxt, '<')) != NULL) {
-                if (!strncasecmp(nxt + 1, "href", 4)) break;
-                if (!strncasecmp(nxt + 1, "/D:response", 11) ||
-                    !strncasecmp(nxt + 1, "/response", 9)) break;
-                if (!strncasecmp(nxt + 1, "D:collection", 12) ||
-                    !strncasecmp(nxt + 1, "collection", 10)) {
+                const char *nm = xml_bare_name(nxt);
+                if (nm && !strncasecmp(nm, "href", 4) &&
+                    (nm[4] == '>' || nm[4] == ' ' || nm[4] == '/')) break;
+                if (nxt[1] == '/' && nm && !strncasecmp(nm, "response", 8) &&
+                    nm[8] == '>') break;
+                if (nm && !strncasecmp(nm, "collection", 10) &&
+                    (nm[10] == '>' || nm[10] == ' ' || nm[10] == '/')) {
                     if (nxt[1] != '/') strcpy(coll, "1");
                     nxt++;
                     continue;
                 }
-                if (!strncasecmp(nxt + 1, "getcontentlength", 16)) {
+                if (nm && !strncasecmp(nm, "getcontentlength", 16) &&
+                    (nm[16] == '>' || nm[16] == ' ')) {
                     if (tag_body(nxt, "getcontentlength", clen, sizeof clen))
                         continue;
                 }
-                if (!strncasecmp(nxt + 1, "getlastmodified", 15)) {
+                if (nm && !strncasecmp(nm, "getlastmodified", 15) &&
+                    (nm[15] == '>' || nm[15] == ' ')) {
                     if (tag_body(nxt, "getlastmodified", cmod, sizeof cmod))
                         continue;
                 }
