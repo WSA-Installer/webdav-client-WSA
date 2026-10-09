@@ -45,21 +45,25 @@ jobs:
           mkdir -p dist
           MBEDTLS="/tmp/mbedtls-${MBEDTLS_VERSION}/library"
           echo '#undef MBEDTLS_DEBUG_C' > "/tmp/mbedtls-${MBEDTLS_VERSION}/include/mbedtls/mbedtls_user_config.h"
-          echo "=== preprocessor check: is WEBDAVFS_WITH_TLS active? ==="
-          zig cc -target "$ZIG_TARGET" -DWEBDAVFS_WITH_TLS=1 \
-            -I "/tmp/mbedtls-${MBEDTLS_VERSION}/include" \
-            -dM -E src/webdavfs.c 2>/dev/null | grep -E "WEBDAVFS_WITH_TLS|MBEDTLS_SSL_TLS_C" || echo "MACRO CHECK FAILED"
-          echo "=== compile webdavfs.c alone, check undefined mbedtls syms ==="
+          INC="/tmp/mbedtls-${MBEDTLS_VERSION}/include"
+          echo "=== file type of .o ==="
           zig cc -target "$ZIG_TARGET" -Os -c \
             -DVERSION='"0.2.0"' -DWEBDAVFS_WITH_TLS=1 \
             -DMBEDTLS_USER_CONFIG_FILE='"mbedtls/mbedtls_user_config.h"' \
-            -I "/tmp/mbedtls-${MBEDTLS_VERSION}/include" \
+            -I "$INC" \
             src/webdavfs.c -o /tmp/webdavfs-check.o
+          file /tmp/webdavfs-check.o
           ls -la /tmp/webdavfs-check.o
-          nm -u /tmp/webdavfs-check.o 2>/dev/null | grep -c mbedtls || echo "0 mbedtls undef syms via nm"
-          nm /tmp/webdavfs-check.o 2>/dev/null | grep -i "mbedtls\|tls_start\|tls_read" | head -n 10 || true
-          echo "=== strings in webdavfs.o ==="
-          strings /tmp/webdavfs-check.o | grep -E "^tls:|mbedtls" | head -n 5 || echo "no tls strings in .o"
+          echo "=== readelf undefined mbedtls syms ==="
+          readelf -sW /tmp/webdavfs-check.o | grep -i mbedtls | head -n 15 || echo "READ ELF: no mbedtls syms"
+          echo "=== preprocessed source: mbedtls_ssl_read present? ==="
+          zig cc -target "$ZIG_TARGET" -DWEBDAVFS_WITH_TLS=1 \
+            -DMBEDTLS_USER_CONFIG_FILE='"mbedtls/mbedtls_user_config.h"' \
+            -I "$INC" -E src/webdavfs.c 2>/dev/null | grep -c "mbedtls_ssl_read" || echo "0 occurrences of mbedtls_ssl_read in preprocessed source"
+          echo "=== preprocessed source: tls_start body present? ==="
+          zig cc -target "$ZIG_TARGET" -DWEBDAVFS_WITH_TLS=1 \
+            -DMBEDTLS_USER_CONFIG_FILE='"mbedtls/mbedtls_user_config.h"' \
+            -I "$INC" -E src/webdavfs.c 2>/dev/null | grep -c "tls_start" || echo "0 occurrences of tls_start"
           exit 1
       - name: Install QEMU (for aarch64 smoke on x86_64 host)
         if: matrix.target == 'aarch64'
