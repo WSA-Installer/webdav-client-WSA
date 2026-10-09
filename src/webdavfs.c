@@ -374,7 +374,7 @@ static int tls_write(const unsigned char *buf, size_t n) {
 
 static int net_read(int fd, unsigned char *buf, size_t n) {
 #if WEBDAVFS_WITH_TLS
-    if (g_wd.https) return tls_read(buf, n);
+    if (*(volatile int *)&g_wd.https) return tls_read(buf, n);
 #endif
     ssize_t r = recv(fd, buf, n, 0);
     return (int)r;
@@ -382,7 +382,7 @@ static int net_read(int fd, unsigned char *buf, size_t n) {
 
 static int net_write(int fd, const unsigned char *buf, size_t n) {
 #if WEBDAVFS_WITH_TLS
-    if (g_wd.https) return tls_write(buf, n);
+    if (*(volatile int *)&g_wd.https) return tls_write(buf, n);
 #endif
     ssize_t r = send(fd, buf, n, MSG_NOSIGNAL);
     return (int)r;
@@ -418,7 +418,7 @@ static int http_connect(void) {
     int one = 1;
     setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof one);
 #if WEBDAVFS_WITH_TLS
-    if (g_wd.https) {
+    if (*(volatile int *)&g_wd.https) {
         if (tls_start(fd) != 0) { close(fd); return -1; }
     }
 #else
