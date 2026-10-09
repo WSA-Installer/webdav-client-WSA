@@ -51,8 +51,8 @@ jobs:
             -DVERSION='"0.2.0"' \
             -I "$INC" src/webdavfs.c -o /tmp/webdavfs.o
           ls -la /tmp/webdavfs.o
-          echo "--- webdavfs.o ALL undef syms (first 30) ---"
-          readelf -sW /tmp/webdavfs.o | awk '$7 == "UND" {print $8}' | sort -u | head -n 30
+          echo "--- TLS marker in webdavfs.o ---"
+          strings /tmp/webdavfs.o | grep "webdavfs-TLS-" || echo "NO TLS MARKER FOUND"
           echo "--- webdavfs.o mbedtls undef count ---"
           readelf -sW /tmp/webdavfs.o | awk '$7 == "UND" && $8 ~ /mbedtls/ {c++} END {print c+0}'
           echo "--- strings tls: in webdavfs.o ---"

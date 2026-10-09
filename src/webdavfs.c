@@ -10,6 +10,12 @@
 #define WEBDAVFS_WITH_TLS 1
 #endif
 
+#if WEBDAVFS_WITH_TLS
+#define WEBDAVFS_TLS_MARKER "webdavfs-TLS-ENABLED"
+#else
+#define WEBDAVFS_TLS_MARKER "webdavfs-TLS-DISABLED"
+#endif
+
 #define _GNU_SOURCE
 #include <stdio.h>
 #include <stdlib.h>
@@ -306,6 +312,7 @@ static mbedtls_ctr_drbg_context g_drbg;
 static mbedtls_x509_crt g_ca;
 static int g_tls_ready = 0;
 
+__attribute__((used))
 static int tls_init(void) {
     int ret;
     const char *pers = "webdavfs";
@@ -340,6 +347,7 @@ static int tls_init(void) {
     return 0;
 }
 
+__attribute__((used))
 static int tls_start(int fd) {
     int ret;
     if (!g_tls_ready && tls_init() != 0) return -1;
@@ -357,6 +365,7 @@ static int tls_start(int fd) {
     return 0;
 }
 
+__attribute__((used))
 static int tls_read(unsigned char *buf, size_t n) {
     int r = mbedtls_ssl_read(&g_ssl, buf, n);
     if (r < 0 && r != MBEDTLS_ERR_SSL_WANT_READ && r != MBEDTLS_ERR_SSL_WANT_WRITE)
@@ -364,6 +373,7 @@ static int tls_read(unsigned char *buf, size_t n) {
     return r;
 }
 
+__attribute__((used))
 static int tls_write(const unsigned char *buf, size_t n) {
     int r = mbedtls_ssl_write(&g_ssl, buf, n);
     if (r < 0 && r != MBEDTLS_ERR_SSL_WANT_READ && r != MBEDTLS_ERR_SSL_WANT_WRITE)
@@ -1937,7 +1947,7 @@ int main(int argc, char **argv) {
 
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--version") || !strcmp(argv[i], "-V")) {
-            printf("webdavfs %s\n", VERSION);
+            printf("webdavfs %s (%s)\n", VERSION, WEBDAVFS_TLS_MARKER);
             return 0;
         }
         if (!strcmp(argv[i], "--help") || !strcmp(argv[i], "-h")) {
