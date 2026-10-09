@@ -62,13 +62,11 @@ jobs:
             sh -c 'zig cc -target "$0" -O2 -fno-lto -c -I "$1" -I "$2" "$3" -o "/tmp/mbobj/$(basename "$3" .c).o"' \
               "$ZIG_TARGET" "$INC" "$LIB" {}
           ls /tmp/mbobj/*.o | wc -l
-          echo "=== link (all .o files, no archive) ==="
-          zig cc -target "$ZIG_TARGET" -O2 -fno-lto -static \
+          echo "=== link (all .o files, no archive, -s = strip via LLD) ==="
+          zig cc -target "$ZIG_TARGET" -O2 -fno-lto -static -s \
             /tmp/webdavfs.o /tmp/mbobj/*.o \
-            -o "dist/$ASSET.tmp"
-          ls -la "dist/$ASSET.tmp"
-          zig strip "dist/$ASSET.tmp"
-          mv "dist/$ASSET.tmp" "dist/$ASSET"
+            -o "dist/$ASSET"
+          ls -la "dist/$ASSET"
           file "dist/$ASSET"
           chmod 755 "dist/$ASSET"
           SIZE=$(stat -c %s "dist/$ASSET")
