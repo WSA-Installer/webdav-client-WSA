@@ -33,9 +33,9 @@ jobs:
           ZIG_TARGET: ${{ matrix.zig_target }}
         run: |
           set -eu
-          MBEDTLS_VERSION=3.6.4
-          curl -fsSL "https://github.com/Mbed-TLS/mbedtls/archive/refs/tags/v${MBEDTLS_VERSION}.tar.gz" -o /tmp/mbedtls.tar.gz
-          tar -xzf /tmp/mbedtls.tar.gz -C /tmp
+          MBEDTLS_VERSION=3.6.7
+          curl -fsSL "https://github.com/Mbed-TLS/mbedtls/releases/download/mbedtls-${MBEDTLS_VERSION}/mbedtls-${MBEDTLS_VERSION}.tar.bz2" -o /tmp/mbedtls.tar.bz2
+          tar -xjf /tmp/mbedtls.tar.bz2 -C /tmp
           make -C "/tmp/mbedtls-${MBEDTLS_VERSION}/library" -j"$(nproc)" \
             CC="zig cc -target ${ZIG_TARGET}" \
             AR="zig ar" \
@@ -45,7 +45,7 @@ jobs:
         env:
           ZIG_TARGET: ${{ matrix.zig_target }}
           ASSET: ${{ matrix.asset }}
-          MBEDTLS_VERSION: 3.6.4
+          MBEDTLS_VERSION: 3.6.7
         run: |
           set -eu
           mkdir -p dist
