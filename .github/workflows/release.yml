@@ -67,7 +67,7 @@ jobs:
             /tmp/webdavfs.o /tmp/mbobj/*.o \
             -o "dist/$ASSET.tmp"
           ls -la "dist/$ASSET.tmp"
-          strip "dist/$ASSET.tmp"
+          zig strip "dist/$ASSET.tmp"
           mv "dist/$ASSET.tmp" "dist/$ASSET"
           file "dist/$ASSET"
           chmod 755 "dist/$ASSET"
