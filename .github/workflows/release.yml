@@ -44,32 +44,23 @@ jobs:
           set -eu
           mkdir -p dist
           MBEDTLS="/tmp/mbedtls-${MBEDTLS_VERSION}/library"
-          # Disable MBEDTLS_DEBUG_C so we don't depend on the generated
-          # ssl_debug_helpers.c (framework tooling); unused for our threat
-          # model (loopback HTTP, optional TLS).
           echo '#undef MBEDTLS_DEBUG_C' > "/tmp/mbedtls-${MBEDTLS_VERSION}/include/mbedtls/mbedtls_user_config.h"
-          # Compile webdavfs.c together with every mbedTLS library source in
-          # a single zig cc invocation — no archive/object handoff, so the
-          # linker cannot drop the TLS code.
-          mapfile -t MBEDTLS_SRC < <(find "$MBEDTLS" -maxdepth 1 -name '*.c' | sort)
-          echo "mbedTLS sources: ${#MBEDTLS_SRC[@]}"
-          zig cc -target "$ZIG_TARGET" -Os -static -s \
+          echo "=== preprocessor check: is WEBDAVFS_WITH_TLS active? ==="
+          zig cc -target "$ZIG_TARGET" -DWEBDAVFS_WITH_TLS=1 \
+            -I "/tmp/mbedtls-${MBEDTLS_VERSION}/include" \
+            -dM -E src/webdavfs.c 2>/dev/null | grep -E "WEBDAVFS_WITH_TLS|MBEDTLS_SSL_TLS_C" || echo "MACRO CHECK FAILED"
+          echo "=== compile webdavfs.c alone, check undefined mbedtls syms ==="
+          zig cc -target "$ZIG_TARGET" -Os -c \
             -DVERSION='"0.2.0"' -DWEBDAVFS_WITH_TLS=1 \
             -DMBEDTLS_USER_CONFIG_FILE='"mbedtls/mbedtls_user_config.h"' \
-            -Wall -Wextra \
             -I "/tmp/mbedtls-${MBEDTLS_VERSION}/include" \
-            -I "$MBEDTLS" \
-            src/webdavfs.c "${MBEDTLS_SRC[@]}" \
-            -o "dist/$ASSET"
-          file "dist/$ASSET"
-          chmod 755 "dist/$ASSET"
-          SIZE=$(stat -c %s "dist/$ASSET")
-          echo "binary size: $SIZE bytes"
-          if [ "$SIZE" -lt 200000 ]; then
-            echo "binary suspiciously small - mbedTLS likely not linked" >&2
-            exit 1
-          fi
-          strings "dist/$ASSET" | grep -q mbedtls
+            src/webdavfs.c -o /tmp/webdavfs-check.o
+          ls -la /tmp/webdavfs-check.o
+          nm -u /tmp/webdavfs-check.o 2>/dev/null | grep -c mbedtls || echo "0 mbedtls undef syms via nm"
+          nm /tmp/webdavfs-check.o 2>/dev/null | grep -i "mbedtls\|tls_start\|tls_read" | head -n 10 || true
+          echo "=== strings in webdavfs.o ==="
+          strings /tmp/webdavfs-check.o | grep -E "^tls:|mbedtls" | head -n 5 || echo "no tls strings in .o"
+          exit 1
       - name: Install QEMU (for aarch64 smoke on x86_64 host)
         if: matrix.target == 'aarch64'
         run: |
