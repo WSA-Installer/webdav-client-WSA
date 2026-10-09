@@ -50,11 +50,14 @@ jobs:
           set -eu
           mkdir -p dist
           MBEDTLS="/tmp/mbedtls-${MBEDTLS_VERSION}/library"
+          # Link the .o files produced by the mbedTLS make step directly —
+          # objects are always included, unlike archives which the linker
+          # may extract lazily (and which zig cc has been observed to drop).
           zig cc -target "$ZIG_TARGET" -Os -static -s \
-            -DVERSION='"0.2.0"' -Wall -Wextra -Werror \
+            -DVERSION='"0.2.0"' -DWEBDAVFS_WITH_TLS=1 \
+            -Wall -Wextra -Werror \
             -I "/tmp/mbedtls-${MBEDTLS_VERSION}/include" \
-            -L "$MBEDTLS" -lmbedtls -lmbedx509 -lmbedcrypto \
-            src/webdavfs.c \
+            src/webdavfs.c "$MBEDTLS"/*.o \
             -o "dist/$ASSET"
           file "dist/$ASSET"
           chmod 755 "dist/$ASSET"
