@@ -50,26 +50,20 @@ jobs:
           set -eu
           mkdir -p dist
           MBEDTLS="/tmp/mbedtls-${MBEDTLS_VERSION}/library"
-          # Link the .o files produced by the mbedTLS make step directly —
-          # objects are always included, unlike archives which the linker
-          # may extract lazily (and which zig cc has been observed to drop).
-          zig cc -target "$ZIG_TARGET" -Os -static -s \
+          echo "=== mbedTLS .o files (first 10, with sizes) ==="
+          ls -la "$MBEDTLS"/*.o | head -n 10
+          echo "=== total .o count and bytes ==="
+          ls "$MBEDTLS"/*.o | wc -l
+          du -cb "$MBEDTLS"/*.o | tail -n 1
+          echo "=== does webdavfs.o reference mbedtls? ==="
+          zig cc -target "$ZIG_TARGET" -Os -c \
             -DVERSION='"0.2.0"' -DWEBDAVFS_WITH_TLS=1 \
-            -Wall -Wextra -Werror \
             -I "/tmp/mbedtls-${MBEDTLS_VERSION}/include" \
-            src/webdavfs.c "$MBEDTLS"/*.o \
-            -o "dist/$ASSET"
-          file "dist/$ASSET"
-          chmod 755 "dist/$ASSET"
-          # Guard: a TLS-enabled binary must be substantially larger than the
-          # ~52 KB TLS-less build; this catches silent link drops.
-          SIZE=$(stat -c %s "dist/$ASSET")
-          echo "binary size: $SIZE bytes"
-          if [ "$SIZE" -lt 200000 ]; then
-            echo "binary suspiciously small - mbedTLS likely not linked" >&2
-            exit 1
-          fi
-          strings "dist/$ASSET" | grep -q mbedtls
+            src/webdavfs.c -o /tmp/webdavfs-check.o
+          llvm-nm -u /tmp/webdavfs-check.o | grep -c mbedtls || echo "NO mbedtls undefined symbols in webdavfs.o"
+          llvm-nm -u /tmp/webdavfs-check.o | head -n 20
+          echo "=== mbedtls header present? ==="
+          test -f "/tmp/mbedtls-${MBEDTLS_VERSION}/include/mbedtls/ssl.h" && echo "ssl.h FOUND" || echo "ssl.h MISSING"
       - name: Install QEMU (for aarch64 smoke on x86_64 host)
         if: matrix.target == 'aarch64'
         run: |
