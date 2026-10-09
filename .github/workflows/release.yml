@@ -45,27 +45,30 @@ jobs:
           mkdir -p dist /tmp/mbobj
           INC="/tmp/mbedtls-${MBEDTLS_VERSION}/include"
           LIB="/tmp/mbedtls-${MBEDTLS_VERSION}/library"
-          echo '#undef MBEDTLS_DEBUG_C' > "$INC/mbedtls/mbedtls_user_config.h"
-          # -fno-lto + -O2: -Os under zig's whole-TU IPO was eliminating the
-          # conditional TLS paths (g_wd.https branch) as dead code even though
-          # https is set at runtime — verified by O0=281KB vs Os=26KB .o sizes.
+          # Use default mbedTLS config (release tarball ships generated files).
           echo "=== compile webdavfs.c ==="
           zig cc -target "$ZIG_TARGET" -O2 -fno-lto -c \
             -DVERSION='"0.2.0"' -DWEBDAVFS_WITH_TLS=1 \
-            -DMBEDTLS_USER_CONFIG_FILE='"mbedtls/mbedtls_user_config.h"' \
             -I "$INC" src/webdavfs.c -o /tmp/webdavfs.o
           ls -la /tmp/webdavfs.o
+          echo "--- webdavfs.o ALL undef syms (first 30) ---"
+          readelf -sW /tmp/webdavfs.o | awk '$7 == "UND" {print $8}' | sort -u | head -n 30
           echo "--- webdavfs.o mbedtls undef count ---"
           readelf -sW /tmp/webdavfs.o | awk '$7 == "UND" && $8 ~ /mbedtls/ {c++} END {print c+0}'
+          echo "--- strings tls: in webdavfs.o ---"
+          strings /tmp/webdavfs.o | grep -c "^tls:" || echo "0 tls strings"
           echo "=== compile mbedTLS sources to .o ==="
           find "$LIB" -maxdepth 1 -name '*.c' | sort | xargs -P"$(nproc)" -I{} \
             sh -c 'zig cc -target "$0" -O2 -fno-lto -c -I "$1" -I "$2" "$3" -o "/tmp/mbobj/$(basename "$3" .c).o"' \
               "$ZIG_TARGET" "$INC" "$LIB" {}
           ls /tmp/mbobj/*.o | wc -l
           echo "=== link (all .o files, no archive) ==="
-          zig cc -target "$ZIG_TARGET" -O2 -fno-lto -static -s \
+          zig cc -target "$ZIG_TARGET" -O2 -fno-lto -static \
             /tmp/webdavfs.o /tmp/mbobj/*.o \
-            -o "dist/$ASSET"
+            -o "dist/$ASSET.tmp"
+          ls -la "dist/$ASSET.tmp"
+          strip "dist/$ASSET.tmp"
+          mv "dist/$ASSET.tmp" "dist/$ASSET"
           file "dist/$ASSET"
           chmod 755 "dist/$ASSET"
           SIZE=$(stat -c %s "dist/$ASSET")
