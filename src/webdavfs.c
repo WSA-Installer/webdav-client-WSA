@@ -1826,9 +1826,27 @@ static int selftest(void) {
             char *full = xml_unescape(href);
             d.name = href_to_name(full);
             free(full);
-            const char *scan = p;
+            /* bound the scan to this <D:response> so we don't pick up
+               the next entry's getcontentlength */
+            const char *resp_end = p;
+            const char *re = p;
+            while ((re = strchr(re, '<')) != NULL) {
+                if (re[1] == '/') {
+                    const char *nm = xml_bare_name(re);
+                    if (nm && !strncasecmp(nm, "response", 8) && nm[8] == '>') {
+                        resp_end = re;
+                        break;
+                    }
+                }
+                re++;
+            }
+            size_t span = (size_t)(resp_end - p);
+            char chunk[1024];
+            if (span >= sizeof chunk) span = sizeof chunk - 1;
+            memcpy(chunk, p, span);
+            chunk[span] = 0;
             char tmp[64];
-            if (tag_body(scan, "getcontentlength", tmp, sizeof tmp))
+            if (tag_body(chunk, "getcontentlength", tmp, sizeof tmp))
                 d.size = atoll(tmp);
             if (n == 0) {
                 if (strcmp(d.name, "Sub Dir") || d.size != 0) {
