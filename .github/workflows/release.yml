@@ -28,27 +28,50 @@ jobs:
       - uses: mlugg/setup-zig@v2
         with:
           version: 0.13.0
+      - name: Build mbedTLS (static, cross)
+        env:
+          ZIG_TARGET: ${{ matrix.zig_target }}
+        run: |
+          set -eu
+          MBEDTLS_VERSION=3.6.4
+          curl -fsSL "https://github.com/Mbed-TLS/mbedtls/archive/refs/tags/v${MBEDTLS_VERSION}.tar.gz" -o /tmp/mbedtls.tar.gz
+          tar -xzf /tmp/mbedtls.tar.gz -C /tmp
+          make -C "/tmp/mbedtls-${MBEDTLS_VERSION}/library" -j"$(nproc)" \
+            CC="zig cc -target ${ZIG_TARGET}" \
+            AR="zig ar" \
+            CFLAGS="-Os -fPIC" \
+            libmbedcrypto.a libmbedx509.a libmbedtls.a
       - name: Compile static binary
         env:
           ZIG_TARGET: ${{ matrix.zig_target }}
           ASSET: ${{ matrix.asset }}
+          MBEDTLS_VERSION: 3.6.4
         run: |
           set -eu
           mkdir -p dist
-          zig cc -target "$ZIG_TARGET" -Os -static -s -DVERSION='"0.1.0-dev"' -Wall -Wextra -Werror src/webdavfs.c -o "dist/$ASSET"
+          MBEDTLS="/tmp/mbedtls-${MBEDTLS_VERSION}/library"
+          zig cc -target "$ZIG_TARGET" -Os -static -s \
+            -DVERSION='"0.2.0"' -Wall -Wextra -Werror \
+            -I "/tmp/mbedtls-${MBEDTLS_VERSION}/include" \
+            src/webdavfs.c \
+            "$MBEDTLS/libmbedtls.a" "$MBEDTLS/libmbedx509.a" "$MBEDTLS/libmbedcrypto.a" \
+            -o "dist/$ASSET"
           file "dist/$ASSET"
           chmod 755 "dist/$ASSET"
-      - name: Smoke test (scaffold must fail closed)
+      - name: Smoke test
         env:
           ASSET: ${{ matrix.asset }}
         run: |
           set -eu
-          "dist/$ASSET" --version
-          if "dist/$ASSET" http://127.0.0.1:8085/c/ /tmp/webdavfs-test >/tmp/out 2>&1; then
-            echo "Scaffold unexpectedly accepted a mount request" >&2
+          "dist/$ASSET" --version | grep -q webdavfs
+          "dist/$ASSET" --selftest
+          "dist/$ASSET" --help >/dev/null
+          # Graceful failure: nonexistent mountpoint must be rejected before any mount.
+          if "dist/$ASSET" http://127.0.0.1:8085/c/ /nonexistent >/tmp/out 2>&1; then
+            echo "unexpected mount success" >&2
             exit 1
           fi
-          grep -q 'operation engine is not implemented' /tmp/out
+          grep -Eq 'not a directory|cannot open /dev/fuse|mount failed' /tmp/out
       - uses: actions/upload-artifact@v4
         with:
           name: native-${{ matrix.target }}
@@ -114,10 +137,11 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           prerelease: true
-          name: "WebDAV Client WSA ${{ github.ref_name }} (development scaffold)"
+          name: "WebDAV Client WSA ${{ github.ref_name }}"
           body: |
-            **Development scaffold only — not a working WebDAV filesystem.**
-            The current C executable intentionally refuses mount requests because the FUSE/WebDAV operation engine has not been implemented. These assets verify the cross-compilation and packaging pipeline only.
+            Full read-write WebDAV FUSE client with static mbedTLS, plus the boot-time drive reconciler script.
+            Mounts registry drives at `/data/media/0/<label>` (loopback via `adb reverse tcp:8085 tcp:8085` only).
+            Smoke-tested in CI (`--selftest`, graceful mount rejection); on-device behavior still requires manual testing.
           files: |
             dist/webdavfs.sh
             dist/webdavfs-x86_64
