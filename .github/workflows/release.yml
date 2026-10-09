@@ -1,0 +1,124 @@
+name: Build and Release
+
+on:
+  push:
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-native:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64
+            zig_target: x86_64-linux-musl
+            asset: webdavfs-x86_64
+          - target: aarch64
+            zig_target: aarch64-linux-musl
+            asset: webdavfs-aarch64
+    steps:
+      - uses: actions/checkout@v4
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.13.0
+      - name: Compile static binary
+        env:
+          ZIG_TARGET: ${{ matrix.zig_target }}
+          ASSET: ${{ matrix.asset }}
+        run: |
+          set -eu
+          mkdir -p dist
+          zig cc -target "$ZIG_TARGET" -Os -static -s -DVERSION='"0.1.0-dev"' -Wall -Wextra -Werror src/webdavfs.c -o "dist/$ASSET"
+          file "dist/$ASSET"
+          chmod 755 "dist/$ASSET"
+      - name: Smoke test (scaffold must fail closed)
+        env:
+          ASSET: ${{ matrix.asset }}
+        run: |
+          set -eu
+          "dist/$ASSET" --version
+          if "dist/$ASSET" http://127.0.0.1:8085/c/ /tmp/webdavfs-test >/tmp/out 2>&1; then
+            echo "Scaffold unexpectedly accepted a mount request" >&2
+            exit 1
+          fi
+          grep -q 'operation engine is not implemented' /tmp/out
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-${{ matrix.target }}
+          path: dist/${{ matrix.asset }}
+          if-no-files-found: error
+
+  package:
+    needs: build-native
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: native-*
+          path: dist/native
+          merge-multiple: true
+      - name: Assemble release assets
+        run: |
+          set -eu
+          mkdir -p dist/payload
+          cp dist/native/webdavfs-x86_64 dist/payload/
+          cp dist/native/webdavfs-aarch64 dist/payload/
+          cp scripts/webdavfs.sh dist/webdavfs.sh
+          chmod 755 dist/webdavfs.sh
+          cat > dist/webdavfs-universal <<'LAUNCHER'
+          #!/bin/sh
+          set -eu
+          SELF="$0"
+          TMP="${TMPDIR:-/tmp}/webdavfs-universal.$$"
+          mkdir -p "$TMP"
+          trap 'rm -rf "$TMP"' EXIT HUP INT TERM
+          line=$(awk '$0=="__WEBDAVFS_PAYLOAD_BELOW__" {print NR+1; exit}' "$SELF")
+          [ -n "$line" ] || { echo "webdavfs-universal: payload missing" >&2; exit 1; }
+          tail -n +"$line" "$SELF" | tar -xz -C "$TMP"
+          case "$(uname -m)" in
+            x86_64|amd64) BIN="$TMP/webdavfs-x86_64" ;;
+            aarch64|arm64) BIN="$TMP/webdavfs-aarch64" ;;
+            *) echo "Unsupported architecture: $(uname -m)" >&2; exit 126 ;;
+          esac
+          chmod 755 "$BIN"
+          exec "$BIN" "$@"
+          LAUNCHER
+          printf '%s\n' '__WEBDAVFS_PAYLOAD_BELOW__' >> dist/webdavfs-universal
+          tar -czf dist/payload.tar.gz -C dist/payload .
+          cat dist/payload.tar.gz >> dist/webdavfs-universal
+          chmod 755 dist/webdavfs-universal
+          cp dist/native/webdavfs-x86_64 dist/
+          cp dist/native/webdavfs-aarch64 dist/
+          sh -n dist/webdavfs.sh
+          for f in webdavfs.sh webdavfs-x86_64 webdavfs-aarch64 webdavfs-universal; do test -s "dist/$f"; done
+          ls -lh dist/webdavfs*
+      - uses: actions/upload-artifact@v4
+        with:
+          name: webdavfs-release-assets
+          path: |
+            dist/webdavfs.sh
+            dist/webdavfs-x86_64
+            dist/webdavfs-aarch64
+            dist/webdavfs-universal
+          if-no-files-found: error
+      - name: Publish development prerelease
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          prerelease: true
+          name: "WebDAV Client WSA ${{ github.ref_name }} (development scaffold)"
+          body: |
+            **Development scaffold only — not a working WebDAV filesystem.**
+            The current C executable intentionally refuses mount requests because the FUSE/WebDAV operation engine has not been implemented. These assets verify the cross-compilation and packaging pipeline only.
+          files: |
+            dist/webdavfs.sh
+            dist/webdavfs-x86_64
+            dist/webdavfs-aarch64
+            dist/webdavfs-universal
