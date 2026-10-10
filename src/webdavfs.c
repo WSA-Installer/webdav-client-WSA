@@ -1024,6 +1024,22 @@ static node_t *node_add(const char *path, int is_dir) {
     return n;
 }
 
+/* FUSE root must be inode 1 (FUSE_ROOT_ID); create it eagerly so the
+ * first GETATTR/LOOKUP on the mount root does not hit node_by_ino(1)==NULL
+ * (which replied ENOENT and made every ls/stat fail). Root path is the
+ * WebDAV base URL (join_path("") == g_wd.base). */
+static void node_init_root(void) {
+    if (node_by_ino(1)) return;
+    if (g_node_n == g_node_cap) {
+        g_node_cap = g_node_cap ? g_node_cap * 2 : 64;
+        g_nodes = xrealloc(g_nodes, g_node_cap * sizeof *g_nodes);
+    }
+    node_t *n = &g_nodes[g_node_n++];
+    n->ino = 1;
+    n->path = xstrdup("");
+    n->is_dir = 1;
+}
+
 static char *path_join2(const char *parent, const char *name) {
     size_t pl = strlen(parent), nl = strlen(name);
     char *p = xmalloc(pl + nl + 2);
@@ -1967,6 +1983,7 @@ int main(int argc, char **argv) {
         return 2;
     }
     if (parse_webdav_url(url) != 0) return 2;
+    node_init_root();
 
     char opts_copy[1024];
     opts_copy[0] = 0;
@@ -1976,6 +1993,26 @@ int main(int argc, char **argv) {
         for (char *tok = strtok_r(opts_copy, ",", &save); tok;
              tok = strtok_r(NULL, ",", &save))
             apply_opt(tok);
+    }
+    /* Kernel FUSE mount options: only pass tokens the kernel understands.
+     * webdavfs-only options (verbose, user=, cache_ttl=, ...) must NOT reach
+     * mount(2) — unknown tokens make it fail with EINVAL. */
+    char kern_opts[1024];
+    kern_opts[0] = 0;
+    if (fuse_opts_extra) {
+        snprintf(opts_copy, sizeof opts_copy, "%s", fuse_opts_extra);
+        char *save = NULL;
+        for (char *tok = strtok_r(opts_copy, ",", &save); tok;
+             tok = strtok_r(NULL, ",", &save)) {
+            if (!strcmp(tok, "allow_other") || !strcmp(tok, "default_permissions") ||
+                !strncmp(tok, "context=", 8) || !strncmp(tok, "fsname=", 7) ||
+                !strncmp(tok, "user_id=", 8) || !strncmp(tok, "group_id=", 9)) {
+                if (strlen(kern_opts) + strlen(tok) + 2 < sizeof kern_opts) {
+                    if (kern_opts[0]) strcat(kern_opts, ",");
+                    strcat(kern_opts, tok);
+                }
+            }
+        }
     }
     if (daemonize && !foreground) {
         if (fork() > 0) exit(0);
@@ -2007,10 +2044,10 @@ int main(int argc, char **argv) {
     snprintf(mopts, sizeof mopts,
              "fd=%d,rootmode=40000,user_id=%d,group_id=%d,allow_other",
              g_fuse_fd, (int)getuid(), (int)getgid());
-    if (fuse_opts_extra && *fuse_opts_extra) {
-        if (strlen(mopts) + strlen(fuse_opts_extra) + 2 < sizeof mopts) {
+    if (kern_opts[0]) {
+        if (strlen(mopts) + strlen(kern_opts) + 2 < sizeof mopts) {
             strcat(mopts, ",");
-            strcat(mopts, fuse_opts_extra);
+            strcat(mopts, kern_opts);
         }
     }
     if (mount("webdavfs", mountpoint, "fuse", MS_NOSUID | MS_NODEV, mopts) != 0) {
