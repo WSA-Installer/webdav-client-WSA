@@ -4,7 +4,7 @@
    Features: HTTP Basic auth, HTTPS (mbedTLS), directory cache, Range reads,
    buffered writes flushed with PUT, -d daemon mode, --selftest. */
 #ifndef VERSION
-#define VERSION "0.2.0"
+#define VERSION "0.2.1"
 #endif
 #ifndef WEBDAVFS_WITH_TLS
 #define WEBDAVFS_WITH_TLS 1
@@ -1399,7 +1399,11 @@ static void op_lookup(struct fuse_in_header *ih, char *name) {
 static void op_getattr(struct fuse_in_header *ih, struct fuse_getattr_in *in) {
     (void)in;
     node_t *node = node_by_ino(ih->nodeid);
-    if (!node) { fuse_reply(ih->unique, -ENOENT, NULL, 0); return; }
+    if (!node) {
+        logmsg("getattr: unknown nodeid=%llu nodes=%zu", (unsigned long long)ih->nodeid, g_node_n);
+        fuse_reply(ih->unique, -ENOENT, NULL, 0);
+        return;
+    }
     long long size = 0;
     time_t mtime = 0;
     if (node_refresh(node, &size, &mtime) != 0) {
@@ -2056,7 +2060,8 @@ int main(int argc, char **argv) {
         return 1;
     }
     g_mountpoint = xstrdup(mountpoint);
-    logmsg("mounted %s at %s (%s)", url, mountpoint, VERSION);
+    logmsg("mounted %s at %s (%s) nodes=%zu root_ino_ok=%d",
+           url, mountpoint, VERSION, g_node_n, node_by_ino(1) != NULL);
 
     unsigned char *buf = xmalloc(140000);
     while (!g_stop) {
@@ -2077,6 +2082,10 @@ int main(int argc, char **argv) {
             op_init(ih, (char *)(ih + 1));
             continue;
         }
+        if (g_verbose)
+            logmsg("fuse op=%u nodeid=%llu unique=%llu len=%zd",
+                   ih->opcode, (unsigned long long)ih->nodeid,
+                   (unsigned long long)ih->unique, n);
         char *payload = (char *)(ih + 1);
         dispatch(ih->unique, ih->opcode, ih->nodeid, payload);
     }
