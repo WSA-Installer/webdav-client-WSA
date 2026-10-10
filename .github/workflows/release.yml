@@ -48,7 +48,7 @@ jobs:
           # Use default mbedTLS config (release tarball ships generated files).
           echo "=== compile webdavfs.c ==="
           zig cc -target "$ZIG_TARGET" -O2 -fno-lto -c \
-            -DVERSION='"0.2.0"' \
+            -DVERSION='"0.2.1"' \
             -I "$INC" src/webdavfs.c -o /tmp/webdavfs.o
           ls -la /tmp/webdavfs.o
           echo "--- TLS marker in webdavfs.o ---"

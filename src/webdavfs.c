@@ -780,13 +780,13 @@ static int propfind_list(const char *rel, dent_t **out_ents, size_t *out_n) {
                 }
                 if (nm && !strncasecmp(nm, "getcontentlength", 16) &&
                     (nm[16] == '>' || nm[16] == ' ')) {
-                    if (tag_body(nxt, "getcontentlength", clen, sizeof clen))
-                        continue;
+                    const char *adv = tag_body(nxt, "getcontentlength", clen, sizeof clen);
+                    if (adv) { nxt = adv; continue; }
                 }
                 if (nm && !strncasecmp(nm, "getlastmodified", 15) &&
                     (nm[15] == '>' || nm[15] == ' ')) {
-                    if (tag_body(nxt, "getlastmodified", cmod, sizeof cmod))
-                        continue;
+                    const char *adv = tag_body(nxt, "getlastmodified", cmod, sizeof cmod);
+                    if (adv) { nxt = adv; continue; }
                 }
                 nxt++;
             }
