@@ -80,15 +80,30 @@ jobs:
         if: matrix.target == 'aarch64'
         run: |
           set -eu
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq qemu-user-static
-          qemu-aarch64-static --version | head -n 1
+          # apt mirrors on GH runners intermittently fail DNS (azure.archive);
+          # retry a few times, then skip smoke instead of failing the release.
+          ok=0
+          for i in 1 2 3 4 5; do
+            if sudo apt-get update -qq && sudo apt-get install -y -qq qemu-user-static; then ok=1; break; fi
+            echo "apt attempt $i failed; retrying in 15s" >&2
+            sleep 15
+          done
+          if [ "$ok" = 1 ]; then
+            qemu-aarch64-static --version | head -n 1
+          else
+            echo "QEMU unavailable; aarch64 smoke test will be skipped" >&2
+            echo "SKIP_QEMU=1" >> "$GITHUB_ENV"
+          fi
       - name: Smoke test
         env:
           ASSET: ${{ matrix.asset }}
           TARGET: ${{ matrix.target }}
         run: |
           set -eu
+          if [ "${SKIP_QEMU:-0}" = 1 ] && [ "$TARGET" = "aarch64" ]; then
+            echo "skipping aarch64 smoke test (no QEMU)"
+            exit 0
+          fi
           RUN=""
           if [ "$TARGET" = "aarch64" ]; then RUN="qemu-aarch64-static"; fi
           $RUN "dist/$ASSET" --version | grep -q webdavfs
