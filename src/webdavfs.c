@@ -4,7 +4,7 @@
    Features: HTTP Basic auth, HTTPS (mbedTLS), directory cache, Range reads,
    buffered writes flushed with PUT, -d daemon mode, --selftest. */
 #ifndef VERSION
-#define VERSION "0.2.1"
+#define VERSION "0.2.2"
 #endif
 #ifndef WEBDAVFS_WITH_TLS
 #define WEBDAVFS_WITH_TLS 1
@@ -1511,6 +1511,13 @@ static void op_open(struct fuse_in_header *ih, struct fuse_open_in *in) {
     if (!node || node->is_dir) { fuse_reply(ih->unique, -EISDIR, NULL, 0); return; }
     int writable = (in->flags & (O_WRONLY | O_RDWR)) != 0;
     int truncate = (in->flags & O_TRUNC) != 0;
+    if (!writable && !truncate) {
+        struct fuse_open_out oo_ro;
+        memset(&oo_ro, 0, sizeof oo_ro);
+        oo_ro.fh = 0;
+        fuse_reply(ih->unique, 0, &oo_ro, sizeof oo_ro);
+        return;
+    }
     wfh_t *w = wfh_open(node, writable, truncate);
     if (!w) { fuse_reply(ih->unique, -EIO, NULL, 0); return; }
     struct fuse_open_out oo;
